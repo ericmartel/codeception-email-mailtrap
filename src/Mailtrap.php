@@ -11,6 +11,7 @@
 namespace Codeception\Module;
 
 use Codeception\Module;
+use GuzzleHttp\Exception\ClientException;
 
 class Mailtrap extends Module
 {
@@ -163,18 +164,18 @@ class Mailtrap extends Module
   public function accessInboxFor($address)
   {
     $inbox = array();
-    $addressPlusDelimiters = '<' . $address . '>';
+    $addressPlusDelimiters = $address;
     foreach($this->fetchedEmails as &$email)
     {
       $email->Headers = $this->getHeaders($email->id)->headers;
       if(!isset($email->Headers->bcc))
       {
-        if(strpos($email->Headers->to, $addressPlusDelimiters) || strpos($email->Headers->cc, $addressPlusDelimiters))
+        if(strpos($email->Headers->to, $addressPlusDelimiters) !== false || strpos($email->Headers->cc, $addressPlusDelimiters) !== false)
         {
           array_push($inbox, $email);
         }
       }
-      else if(strpos($email->Headers->bcc, $addressPlusDelimiters))
+      else if(strpos($email->Headers->bcc, $addressPlusDelimiters) !== false)
       {
         array_push($inbox, $email);
       }
@@ -275,10 +276,32 @@ class Mailtrap extends Module
    */
   protected function getEmailBody($email)
   {
-    if(strlen($email->html_body) > 0)
-      return $email->html_body;
+    try{
+      if(!isset($email->htmlBody))
+      {
+          try {
+            $response = $this->sendRequest('GET', $email->html_source_path);
+            $email->htmlBody = $response->getBody()->getContents();
+          } catch(ClientException $exc){ }          
+      }
 
-    return $email->text_body;
+      if(isset($email->htmlBody) && strlen($email->htmlBody) > 0)
+      {
+        return $email->htmlBody;
+      }
+      
+      if(!isset($email->textBody))
+      {
+        $response = $this->sendRequest('GET', $email->txt_path);
+        $email->textBody = $response->getBody()->getContents();
+      }
+    }
+    catch(Exception $e)
+    {
+      $this->fail('Exception: ' . $e->getMessage());
+    }
+
+    return $email->textBody;
   }
 
   /**
@@ -317,7 +340,7 @@ class Mailtrap extends Module
    */
   protected function getEmailBCC($email)
   {
-    if($email->Headers->bcc != NULL)
+    if(isset($email->Headers->bcc) && $email->Headers->bcc != NULL)
     {
       return $email->Headers->bcc;
     }
@@ -336,7 +359,7 @@ class Mailtrap extends Module
   {
     $recipients = $email->Headers->to . ' ' .
                   $email->Headers->cc;
-    if($email->Headers->bcc != NULL)
+    if(isset($email->Headers->bcc) && $email->Headers->bcc != NULL)
     {
       $recipients .= ' ' . $email->Headers->bcc;  
     }
